@@ -78,17 +78,18 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [preview, setPreview] = useState(false); // host previewing the family keepsake view
   const [editDetails, setEditDetails] = useState(false); // host editing live event details
-  const [showIntro, setShowIntro] = useState(false);
+  // const [showIntro, setShowIntro] = useState(false);
 
   // Called on a FRESH unlock (not a resumed session). Plays the intro once per device.
-  const enter = useCallback((role: Role) => {
-    setAccess(role);
-    try { if (!localStorage.getItem("house:introSeen")) setShowIntro(true); } catch { /* ignore */ }
-  }, []);
-  const finishIntro = useCallback(() => {
-    try { localStorage.setItem("house:introSeen", "1"); } catch { /* ignore */ }
-    setShowIntro(false);
-  }, []);
+  // const enter = useCallback((role: Role) => {
+  //   setAccess(role);
+  //   try { if (!localStorage.getItem("house:introSeen")) setShowIntro(true); } catch { /* ignore */ }
+  // }, []);
+  // const finishIntro = useCallback(() => {
+  //   try { localStorage.setItem("house:introSeen", "1"); } catch { /* ignore */ }
+  //   setShowIntro(false);
+  // }, []);
+  const enter = useCallback((role: Role) => { setAccess(role); }, []);
 
   // On load: fetch public branding, set default theme, resume any saved session,
   // and support QR auto-unlock via a #code in the URL (guest access only).
@@ -178,7 +179,7 @@ export default function App() {
     >
       {night ? <NightSky /> : themeName === "pool" ? <PoolFloats /> : <Balloons />}
 
-      {showIntro && <IntroVideo onDone={finishIntro} />}
+      {/* {showIntro && <IntroVideo onDone={finishIntro} />} */}
 
       {access === "checking" ? (
         <Splash text="🏡 Loading…" />
