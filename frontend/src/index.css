@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: "Nunito", system-ui, sans-serif;
+}
+.display {
+  font-family: "Fredoka", system-ui, sans-serif;
+}
+
+@keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+@keyframes bob { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-10px) rotate(2deg); } }
+@keyframes pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes fall { 0% { transform: translateY(-10vh) rotate(0); } 100% { transform: translateY(110vh) rotate(720deg); } }
+@keyframes twinkle { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@keyframes glow { 0%, 100% { box-shadow: 0 0 30px 6px rgba(255, 241, 160, 0.4); } 50% { box-shadow: 0 0 46px 12px rgba(255, 241, 160, 0.6); } }
+
+.floaty { animation: floaty 5s ease-in-out infinite; }
+.bob { animation: bob 4s ease-in-out infinite; }
+.pop { animation: pop 0.4s ease-out both; }
+
+.confetti-piece { position: fixed; top: 0; width: 10px; height: 14px; border-radius: 2px; z-index: 9999; pointer-events: none; }
+.card-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.card-hover:hover { transform: translateY(-6px) rotate(-1deg); }
+.btn-pop { transition: transform 0.12s ease; }
+.btn-pop:active { transform: scale(0.94); }
+
+.balloon { position: absolute; width: 54px; height: 66px; border-radius: 50% 50% 48% 48%; opacity: 0.55; }
+.balloon::after { content: ""; position: absolute; bottom: -40px; left: 50%; width: 1px; height: 40px; background: rgba(0, 0, 0, 0.15); }
+.star { position: absolute; background: #fff; border-radius: 50%; animation: twinkle 3s ease-in-out infinite; }
+
+/* theme tokens (values set inline on the root element per day/night) */
+.surface { background: var(--surface); }
+.t-text { color: var(--text); }
+.t-muted { color: var(--muted); }
+input, textarea, select { color: var(--text); }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.7; }

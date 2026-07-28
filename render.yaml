@@ -1,0 +1,33 @@
+# Render Blueprint — deploy with "New + > Blueprint" pointed at this repo.
+services:
+  - type: web
+    name: prrrtpal-housewarming-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true        # Render generates a strong secret for you
+      - key: DATABASE_URL
+        sync: false                # paste your Neon pooled URL in the dashboard
+      - key: GUEST_PASSCODE
+        sync: false
+      - key: ADMIN_PASSCODE
+        sync: false
+      - key: FAMILY_PASSCODE
+        sync: false                # unlocks the family keepsake view
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: EVENT_FAMILY_NAME
+        sync: false
+      - key: EVENT_ADDRESS
+        sync: false
+      - key: EVENT_DATE
+        sync: false
+      - key: EVENT_VENUE
+        sync: false
+      - key: EVENT_REGISTRY_URL
+        sync: false
