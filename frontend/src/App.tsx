@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  getPublic, authenticate, getEvent, isUnlocked, getRole, logout,
+  getPublic, authenticate, authenticateGuestPin, getEvent, isUnlocked, getRole, logout,
   rsvps, potluck, gifts, wishlist, gallery, predictions, games as gamesApi, uploadImage, uploadAudio, uploadEcardImage, thumbUrl, cloudinaryConfigured, admin,
   type Role, type EventDetails, type EventContent, type Rsvp, type RsvpStatus, type Dish, type Claim, type WishlistItem, type GalleryPhoto, type SectionFlags, type Reveal, type Prediction, type ThemeName, type GameItem, type GuestListView, type RsvpSelf,
 } from "./lib/api";
@@ -493,6 +493,24 @@ function Gate({ pub, hostMode, onUnlock }: { pub: { familyName: string } | null;
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Returning guests: sign in with the name + PIN from their RSVP (works even
+  // when the guest passcode is switched off — approval is the requirement).
+  const [pinMode, setPinMode] = useState(false);
+  const [gName, setGName] = useState("");
+  const [gPin, setGPin] = useState("");
+  const submitPin = async () => {
+    if (!gName.trim() || !gPin.trim()) return;
+    setBusy(true); setError("");
+    try {
+      const mine = await authenticateGuestPin(gName.trim(), gPin.trim());
+      try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); } catch { /* ignore */ }
+      onUnlock("guest");
+    } catch (e: any) {
+      setError(e?.body?.code === "not_approved"
+        ? "Your RSVP hasn't been approved by the host yet — check back soon! ⏳"
+        : "We couldn't match that name and PIN. Try the exact name you RSVP'd with. 🔎");
+    } finally { setBusy(false); }
+  };
   const submit = async () => {
     if (!code.trim()) return;
     setBusy(true); setError("");
@@ -518,7 +536,26 @@ function Gate({ pub, hostMode, onUnlock }: { pub: { familyName: string } | null;
         <h1 className="display font-bold text-2xl mb-1" style={{ color: "#C96F4A" }}>
           {hostMode ? "Host sign-in" : pub?.familyName ? `${pub.familyName} Housewarming` : "Housewarming Party"}
         </h1>
-        <p className="t-muted font-bold mb-5">{hostMode ? "Enter the host code to open the controls." : "Enter the passcode from your invite to come in."}</p>
+        <p className="t-muted font-bold mb-5">{hostMode ? "Enter the host code to open the controls." : pinMode ? "Sign in with the name and PIN from your RSVP." : "Enter the passcode from your invite to come in."}</p>
+        {pinMode && !hostMode ? (
+          <>
+            <input value={gName} onChange={(e) => { setGName(e.target.value); setError(""); }}
+              placeholder="Name on your RSVP"
+              className="w-full mb-3 px-4 py-3 rounded-xl border-2 font-bold text-center focus:outline-none"
+              style={{ background: "var(--input-bg)", borderColor: "var(--input-border)" }} />
+            <input value={gPin} onChange={(e) => { setGPin(e.target.value); setError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && submitPin()} placeholder="Your PIN" type="password" inputMode="numeric"
+              className="w-full mb-3 px-4 py-3 rounded-xl border-2 font-bold text-center focus:outline-none"
+              style={{ background: "var(--input-bg)", borderColor: "var(--input-border)" }} />
+            {error && <p className="text-red-500 font-bold mb-3 text-sm">{error}</p>}
+            <button onClick={submitPin} disabled={busy}
+              className="btn-pop w-full py-3.5 rounded-xl font-extrabold text-white text-lg shadow-md disabled:opacity-60" style={{ background: "#7C9A6D" }}>
+              {busy ? "Checking…" : "Sign me in ✅"}
+            </button>
+            <button onClick={() => { setPinMode(false); setError(""); }} className="mt-3 text-sm font-bold t-muted underline">I have an invite passcode instead</button>
+          </>
+        ) : (
+          <>
         <input
           value={code} onChange={(e) => { setCode(e.target.value); setError(""); }}
           onKeyDown={(e) => e.key === "Enter" && submit()} placeholder={hostMode ? "Host / admin code" : "Housewarming passcode"}
@@ -530,6 +567,13 @@ function Gate({ pub, hostMode, onUnlock }: { pub: { familyName: string } | null;
           className="btn-pop w-full py-3.5 rounded-xl font-extrabold text-white text-lg shadow-md disabled:opacity-60" style={{ background: "#C96F4A" }}>
           {busy ? "Checking…" : "Come on in! 🔑"}
         </button>
+        {!hostMode && (
+          <button onClick={() => { setPinMode(true); setError(""); }} className="mt-3 text-sm font-bold t-muted underline">
+            Already RSVP'd? Sign in with your name + PIN
+          </button>
+        )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -903,7 +947,7 @@ function RSVP({ refreshKey, isAdmin, addressGated, onUnlockChange }: { refreshKe
           <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={2} placeholder="Anything we should know? Allergies, etc." className={inputCls} style={inputStyle} />
           {!editingMine && (
             <>
-              <label className="block font-extrabold t-muted mb-1">Set a PIN <span className="font-semibold opacity-70">(optional — lets you edit from any device)</span></label>
+              <label className="block font-extrabold t-muted mb-1">Set a PIN <span className="font-semibold opacity-70">(recommended — once you're approved, your name + PIN signs you back in from any device)</span></label>
               <input value={pin} onChange={(e) => setPin(e.target.value)} placeholder="e.g. 1234" maxLength={20} className={inputCls} style={inputStyle} />
             </>
           )}

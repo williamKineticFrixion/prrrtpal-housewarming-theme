@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
-import { roleForPasscode, signToken, requireAuth } from "../auth";
-import { getSections, getContent } from "../db";
+import { roleForPasscode, signToken, requireAuth, hashGuestPin } from "../auth";
+import { getSections, getContent, pool } from "../db";
 import { PUBLIC_EVENT, PRIVATE_EVENT } from "../config";
 
 export const metaRouter = Router();
@@ -28,6 +28,23 @@ metaRouter.post("/auth", async (req, res) => {
     }
   }
   res.json({ role, token: signToken(role) });
+});
+
+// Returning-guest sign-in: name + the PIN they set when they RSVP'd. Only works
+// once the host has APPROVED their RSVP — and works even when the guest
+// passcode is switched off, so approved guests can always get back in.
+// Returns their RSVP identity too, so the device can restore banner + address
+// access without re-finding anything. (Rate-limited with the rest of /api/auth.)
+const guestAuthSchema = z.object({ name: z.string().min(1).max(80), pin: z.string().min(1).max(40) });
+metaRouter.post("/auth/guest", async (req, res) => {
+  const parsed = guestAuthSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Name and PIN required" });
+  const hash = hashGuestPin(parsed.data.name, parsed.data.pin);
+  const { rows } = await pool.query(
+    "SELECT id, edit_token, approved FROM rsvps WHERE pin_hash = $1", [hash]);
+  if (rows.length === 0) return res.status(401).json({ error: "We couldn't match that name and PIN" });
+  if (!rows[0].approved) return res.status(403).json({ error: "Your RSVP hasn't been approved yet", code: "not_approved" });
+  res.json({ role: "guest", token: signToken("guest"), rsvp: { id: rows[0].id, editToken: rows[0].edit_token } });
 });
 
 // Full event details — protected. Only reachable with a valid token.

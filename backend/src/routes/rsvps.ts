@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { randomUUID, createHash } from "crypto";
+import { randomUUID } from "crypto";
 import rateLimit from "express-rate-limit";
 import { pool, getContent } from "../db";
 import { requireAuth } from "../auth";
@@ -10,8 +10,7 @@ rsvpRouter.use(requireAuth()); // any signed-in guest or admin
 
 // PIN is bound to the (normalized) name so name+PIN identifies one RSVP.
 // Note: a short PIN is light security — the real protection is the rate limiter below.
-const hashPin = (name: string, pin: string) =>
-  createHash("sha256").update(`${name.trim().toLowerCase()}:${pin}`).digest("hex");
+import { hashGuestPin as hashPin } from "../auth";
 
 // Throttle PIN lookups so a 4-digit PIN can't be brute-forced over the API.
 const lookupLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 15, standardHeaders: true, legacyHeaders: false });

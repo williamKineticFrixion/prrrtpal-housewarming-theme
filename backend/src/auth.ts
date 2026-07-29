@@ -16,8 +16,14 @@ export function roleForPasscode(code: string | undefined): Role | null {
   return null;
 }
 
+// PIN hash covers name+pin together, so one indexed lookup verifies both.
+// (Kept here so both the RSVP routes and the name+PIN sign-in share it.)
+import { createHash } from "crypto";
+export const hashGuestPin = (name: string, pin: string) =>
+  createHash("sha256").update(`${name.trim().toLowerCase()}:${pin}`).digest("hex");
+
 export function signToken(role: Role): string {
-  return jwt.sign({ role }, SECRET, { expiresIn: "7d" });
+  return jwt.sign({ role }, SECRET, { expiresIn: "30d" }); // long-lived: party guests should not have to re-enter codes
 }
 
 // Augment Express Request with the verified role.

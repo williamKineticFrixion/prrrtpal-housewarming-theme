@@ -2,7 +2,9 @@
 // Drop-in client for the party backend. Reads the API base URL from a Vite env var.
 // In Cloudflare Pages set:  VITE_API_URL = https://prrrtpal-housewarming-api.onrender.com
 //
-// The JWT is kept in sessionStorage so a guest isn't re-prompted on every reload,
+// The JWT is kept in localStorage so guests stay signed in across visits (30-day
+// tokens) — with a sessionStorage fallback so sessions from before this change
+// keep working until they expire. Previously:
 // but it clears when the tab/browser closes. Swap to localStorage if you want it
 // to persist longer.
 
@@ -15,16 +17,16 @@ export type Role = "guest" | "admin" | "family";
 export type ThemeName = "warm" | "pool"; // site-wide visual theme, host-picked
 
 export function getToken(): string | null {
-  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+  try { return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 export function getRole(): Role | null {
-  try { return (sessionStorage.getItem(ROLE_KEY) as Role) || null; } catch { return null; }
+  try { return ((localStorage.getItem(ROLE_KEY) || sessionStorage.getItem(ROLE_KEY)) as Role) || null; } catch { return null; }
 }
 export function isUnlocked(): boolean {
   return !!getToken();
 }
 export function logout(): void {
-  try { sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(ROLE_KEY); } catch {}
+  try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(ROLE_KEY); sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(ROLE_KEY); } catch {}
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -63,10 +65,24 @@ export async function authenticate(passcode: string): Promise<Role> {
     body: JSON.stringify({ passcode }),
   });
   try {
-    sessionStorage.setItem(TOKEN_KEY, data.token);
-    sessionStorage.setItem(ROLE_KEY, data.role);
+    localStorage.setItem(TOKEN_KEY, data.token);
+    localStorage.setItem(ROLE_KEY, data.role);
   } catch {}
   return data.role;
+}
+
+// Returning-guest sign-in: name + PIN → guest token + their RSVP identity
+// (so the device can restore the banner and address unlock immediately).
+export async function authenticateGuestPin(name: string, pin: string): Promise<{ id: string; editToken: string }> {
+  const data = await request<{ role: Role; token: string; rsvp: { id: string; editToken: string } }>("/api/auth/guest", {
+    method: "POST",
+    body: JSON.stringify({ name, pin }),
+  });
+  try {
+    localStorage.setItem(TOKEN_KEY, data.token);
+    localStorage.setItem(ROLE_KEY, data.role);
+  } catch {}
+  return data.rsvp;
 }
 
 export interface SectionFlags { countdown: boolean; details: boolean; rsvp: boolean; food: boolean; photos: boolean; gifts: boolean; game: boolean; gameCenter: boolean; }
