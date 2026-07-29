@@ -15,11 +15,18 @@ metaRouter.get("/public", async (_req, res) => {
 
 // Exchange a passcode for a 7-day token. Rate-limited in index.ts.
 const authSchema = z.object({ passcode: z.string().min(1).max(200) });
-metaRouter.post("/auth", (req, res) => {
+metaRouter.post("/auth", async (req, res) => {
   const parsed = authSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Passcode required" });
   const role = roleForPasscode(parsed.data.passcode);
   if (!role) return res.status(401).json({ error: "That code didn't work" });
+  // Host can close guest entry (Host panel toggle). Admin + family still get in.
+  if (role === "guest") {
+    const content = await getContent();
+    if (!content.guestCodeEnabled) {
+      return res.status(403).json({ error: "Guest entry is currently closed", code: "guest_closed" });
+    }
+  }
   res.json({ role, token: signToken(role) });
 });
 

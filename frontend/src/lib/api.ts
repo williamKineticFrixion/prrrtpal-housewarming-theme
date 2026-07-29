@@ -73,6 +73,7 @@ export interface SectionFlags { countdown: boolean; details: boolean; rsvp: bool
 export interface EventDetails {
   themeName: ThemeName;
   requireRsvpApproval: boolean; // host toggle: gate the address behind RSVP approval
+  guestCodeEnabled: boolean; // host toggle: whether the guest passcode currently works
   addressLocked?: boolean; // true = guest must have an approved RSVP to get the address
   familyName: string; tagline: string; defaultTheme: "day" | "night";
   partyDate: string; timeLabel: string; venueName: string; address: string;
@@ -88,6 +89,7 @@ export function getEvent(): Promise<EventDetails> {
 export interface EventContent {
   themeName: ThemeName;
   requireRsvpApproval: boolean;
+  guestCodeEnabled: boolean;
   familyName: string; tagline: string; partyDate: string; timeLabel: string;
   venueName: string; address: string; hostNote: string; rsvpDeadline: string;
   dishCategories: string[]; registryUrl: string;
@@ -96,9 +98,13 @@ export interface EventContent {
 /* ---------- RSVPs ---------- */
 export type RsvpStatus = "yes" | "maybe" | "no";
 export interface Rsvp {
-  approved: boolean; id: string; name: string; status: RsvpStatus; party_size: number; message: string; email: string; phone: string; created_at: string; }
+  approved: boolean; id: string; name: string; status: RsvpStatus; party_size: number; message: string; email?: string; phone?: string; created_at: string; }
+// What guests see instead of the full list: confirmed names + aggregate headcount.
+export interface GuestListView { names: string[]; totalGoing: number; }
+export interface RsvpSelf { id: string; name: string; status: RsvpStatus; party_size: number; message: string; email: string; phone: string; approved: boolean; }
+
 export const rsvps = {
-  list: (): Promise<Rsvp[]> => request("/api/rsvps"),
+  list: (): Promise<Rsvp[] | GuestListView> => request("/api/rsvps"),
   create: (r: { name: string; status: RsvpStatus; partySize: number; message?: string; email?: string; phone?: string; pin?: string }): Promise<Rsvp & { editToken: string }> =>
     request("/api/rsvps", { method: "POST", body: JSON.stringify(r) }),
   // Recover an RSVP from any device with name + PIN; returns the edit token on a match.
@@ -107,7 +113,7 @@ export const rsvps = {
   // Guest editing their own RSVP, authorized by the secret token they got at create time.
   approve: (id: string, approved: boolean): Promise<Rsvp> =>
     request(`/api/rsvps/${id}/approve`, { method: "PATCH", body: JSON.stringify({ approved }) }),
-  access: (id: string, editToken: string): Promise<{ approved: boolean; address?: string; venueName?: string }> =>
+  access: (id: string, editToken: string): Promise<{ approved: boolean; address?: string; venueName?: string; self?: RsvpSelf }> =>
     request(`/api/rsvps/${id}/access`, { method: "POST", body: JSON.stringify({ editToken }) }),
   updateSelf: (id: string, editToken: string, patch: { name?: string; status?: RsvpStatus; partySize?: number; message?: string; email?: string; phone?: string }): Promise<Rsvp> =>
     request(`/api/rsvps/${id}/self`, { method: "PATCH", body: JSON.stringify({ ...patch, editToken }) }),

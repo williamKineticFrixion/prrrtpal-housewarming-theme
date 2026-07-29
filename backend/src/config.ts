@@ -55,6 +55,9 @@ export type EventContent = {
   // When true, guests must RSVP AND be approved by the host before the party
   // address + directions are shown to them. Admin + family always see them.
   requireRsvpApproval: boolean;
+  // When false, the guest passcode stops working (admin + family still can get
+  // in) — lets the host close the doors while setting up or after the party.
+  guestCodeEnabled: boolean;
   familyName: string;
   tagline: string;
   partyDate: string;   // ISO-local, e.g. "2026-08-15T15:00:00" — drives countdown + photo gate
@@ -70,6 +73,7 @@ export type EventContent = {
 export const DEFAULT_CONTENT: EventContent = {
   themeName: themeNameFromEnv(),
   requireRsvpApproval: process.env.EVENT_REQUIRE_RSVP_APPROVAL !== "false", // on unless explicitly disabled
+  guestCodeEnabled: process.env.EVENT_GUEST_CODE_ENABLED !== "false", // on unless explicitly disabled
 
   familyName: PRIVATE_EVENT.familyName,
   tagline: PRIVATE_EVENT.tagline,

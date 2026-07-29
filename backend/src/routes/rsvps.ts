@@ -17,9 +17,22 @@ const hashPin = (name: string, pin: string) =>
 const lookupLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 15, standardHeaders: true, legacyHeaders: false });
 
 // email/phone are returned, but the frontend only shows them to the admin.
-rsvpRouter.get("/", async (_req, res) => {
+rsvpRouter.get("/", async (req, res) => {
+  // What each role may see (enforced HERE, not in the UI):
+  //  - guest:  names of confirmed "yes" guests only, plus the aggregate
+  //            headcount — no party sizes, messages, contact info, or maybes.
+  //  - family: full list minus contact info.
+  //  - admin:  everything.
+  if (req.role === "guest") {
+    const [names, agg] = await Promise.all([
+      pool.query("SELECT name FROM rsvps WHERE status = 'yes' ORDER BY created_at DESC"),
+      pool.query("SELECT COALESCE(SUM(party_size), 0)::int AS total FROM rsvps WHERE status = 'yes'"),
+    ]);
+    return res.json({ names: names.rows.map((r) => r.name), totalGoing: agg.rows[0].total });
+  }
+  const contact = req.role === "admin" ? "email, phone, " : "";
   const { rows } = await pool.query(
-    "SELECT id, name, status, party_size, message, email, phone, approved, created_at FROM rsvps ORDER BY created_at DESC"
+    `SELECT id, name, status, party_size, message, ${contact}approved, created_at FROM rsvps ORDER BY created_at DESC`
   );
   res.json(rows);
 });
@@ -132,12 +145,16 @@ rsvpRouter.patch("/:id/approve", requireAuth(["admin"]), async (req, res) => {
 rsvpRouter.post("/:id/access", async (req, res) => {
   const token = String(req.body?.editToken || "");
   if (!token) return res.status(403).json({ error: "Missing edit token" });
-  const { rows } = await pool.query("SELECT edit_token, approved FROM rsvps WHERE id = $1", [req.params.id]);
+  const { rows } = await pool.query(
+    "SELECT id, name, status, party_size, message, email, phone, edit_token, approved FROM rsvps WHERE id = $1",
+    [req.params.id]);
   if (rows.length === 0) return res.status(404).json({ error: "RSVP not found" });
   if (!rows[0].edit_token || rows[0].edit_token !== token) return res.status(403).json({ error: "Not allowed" });
-  if (!rows[0].approved) return res.json({ approved: false });
+  // Your own row, token-proven — safe to return in full (it's your data).
+  const { edit_token: _t, ...self } = rows[0];
+  if (!rows[0].approved) return res.json({ approved: false, self });
   const content = await getContent();
-  res.json({ approved: true, address: content.address, venueName: content.venueName });
+  res.json({ approved: true, address: content.address, venueName: content.venueName, self });
 });
 
 // Admin-only: edit an existing RSVP. Send any subset of fields.

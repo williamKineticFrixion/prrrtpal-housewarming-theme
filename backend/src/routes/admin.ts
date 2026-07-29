@@ -54,6 +54,7 @@ const contentSchema = z
   .object({
     themeName: z.enum(["warm", "pool"]),
     requireRsvpApproval: z.boolean(),
+    guestCodeEnabled: z.boolean(),
     familyName: z.string().min(1).max(80),
     tagline: z.string().max(200),
     partyDate: z.string().min(1).max(40),

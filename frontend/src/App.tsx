@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   getPublic, authenticate, getEvent, isUnlocked, getRole, logout,
   rsvps, potluck, gifts, wishlist, gallery, predictions, games as gamesApi, uploadImage, uploadAudio, uploadEcardImage, thumbUrl, cloudinaryConfigured, admin,
-  type Role, type EventDetails, type EventContent, type Rsvp, type RsvpStatus, type Dish, type Claim, type WishlistItem, type GalleryPhoto, type SectionFlags, type Reveal, type Prediction, type ThemeName, type GameItem,
+  type Role, type EventDetails, type EventContent, type Rsvp, type RsvpStatus, type Dish, type Claim, type WishlistItem, type GalleryPhoto, type SectionFlags, type Reveal, type Prediction, type ThemeName, type GameItem, type GuestListView, type RsvpSelf,
 } from "./lib/api";
 import { ECARDS } from "./lib/ecards";
 import { ECARD_FACES } from "./components/ECardFaces";
@@ -13,6 +13,11 @@ const COLORS = ["#C96F4A", "#7C9A6D", "#D9A441", "#7D97B8", "#C98A8A", "#9A6B4F"
 
 // The guest's own RSVP identity (id + secret edit token), stored on this device
 // at RSVP time and recoverable on another device via name + PIN.
+// Visiting /admin shows the gate in host mode: only the admin code is accepted
+// there. (Cloudflare Pages serves the SPA for this path via public/_redirects.)
+const IS_ADMIN_ROUTE = window.location.pathname.replace(/\/+$/, "") === "/admin";
+const cleanAdminPath = () => { try { history.replaceState(null, "", "/" + window.location.search + window.location.hash); } catch { /* ignore */ } };
+
 const MINE_KEY = "party:myRsvp";
 type AddressUnlock = { approved: boolean; address?: string; venueName?: string };
 function readMine(): { id: string; editToken: string } | null {
@@ -89,7 +94,10 @@ export default function App() {
   //   try { localStorage.setItem("house:introSeen", "1"); } catch { /* ignore */ }
   //   setShowIntro(false);
   // }, []);
-  const enter = useCallback((role: Role) => { setAccess(role); }, []);
+  const enter = useCallback((role: Role) => {
+    if (IS_ADMIN_ROUTE) cleanAdminPath();
+    setAccess(role);
+  }, []);
 
   // On load: fetch public branding, set default theme, resume any saved session,
   // and support QR auto-unlock via a #code in the URL (guest access only).
@@ -98,9 +106,18 @@ export default function App() {
       .then((p) => { setPub(p); setNight(p.defaultTheme === "night"); })
       .catch(() => {});
 
-    if (isUnlocked()) { setAccess((getRole() as Role) || "locked"); return; }
+    if (isUnlocked()) {
+      const saved = (getRole() as Role) || null;
+      // On /admin, an existing ADMIN session passes through; any other session
+      // stays locked at the host gate (their token is kept — entering the admin
+      // code upgrades it, and plain "/" still works with their old session).
+      if (IS_ADMIN_ROUTE && saved !== "admin") { setAccess("locked"); return; }
+      if (IS_ADMIN_ROUTE) cleanAdminPath();
+      setAccess(saved || "locked");
+      return;
+    }
 
-    const hashCode = decodeURIComponent(window.location.hash.replace(/^#\/?/, "")).trim();
+    const hashCode = IS_ADMIN_ROUTE ? "" : decodeURIComponent(window.location.hash.replace(/^#\/?/, "")).trim();
     if (hashCode) {
       authenticate(hashCode)
         .then((role) => {
@@ -159,6 +176,14 @@ export default function App() {
     } catch { /* ignore */ }
   };
 
+  // Admin: open/close guest entry live (host panel toggle).
+  const setGuestEnabled = async (guestCodeEnabled: boolean) => {
+    try {
+      const next = await admin.setContent({ guestCodeEnabled });
+      setEvent((ev) => (ev ? { ...ev, ...next } : ev));
+    } catch { /* ignore */ }
+  };
+
   // Admin: switch the site theme live (persisted with the other host-edited content).
   const setSiteTheme = async (themeName: ThemeName) => {
     try {
@@ -184,7 +209,7 @@ export default function App() {
       {access === "checking" ? (
         <Splash text="🏡 Loading…" />
       ) : access === "locked" ? (
-        <Gate pub={pub} onUnlock={enter} />
+        <Gate pub={pub} hostMode={IS_ADMIN_ROUTE} onUnlock={enter} />
       ) : !event ? (
         <Splash text="🎉 Getting the house ready… 🎉" />
       ) : access === "family" ? (
@@ -210,6 +235,8 @@ export default function App() {
               onSetTheme={setSiteTheme}
               requireApproval={event.requireRsvpApproval}
               onSetRequireApproval={setRequireApproval}
+              guestEnabled={event.guestCodeEnabled}
+              onSetGuestEnabled={setGuestEnabled}
               familyName={event.familyName}
               onRefresh={() => setRefreshKey((k) => k + 1)}
               onPreview={() => setPreview(true)}
@@ -462,7 +489,7 @@ function NightSky() {
 }
 
 /* ===================== GATE ===================== */
-function Gate({ pub, onUnlock }: { pub: { familyName: string } | null; onUnlock: (role: Role) => void }) {
+function Gate({ pub, hostMode, onUnlock }: { pub: { familyName: string } | null; hostMode?: boolean; onUnlock: (role: Role) => void }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -471,22 +498,30 @@ function Gate({ pub, onUnlock }: { pub: { familyName: string } | null; onUnlock:
     setBusy(true); setError("");
     try {
       const role = await authenticate(code.trim());
+      if (hostMode && role !== "admin") {
+        // /admin only opens for the host code; drop the token we just stored.
+        logout();
+        setError("That code works on the main page — this door needs the host code. 🛠️");
+        return;
+      }
       onUnlock(role);
-    } catch {
-      setError("Hmm, that code didn't work. Check your invite! 🎟️");
+    } catch (e: any) {
+      setError(e?.body?.code === "guest_closed"
+        ? "Guest entry is currently closed — check back soon! 🔒"
+        : "Hmm, that code didn't work. Check your invite! 🎟️");
     } finally { setBusy(false); }
   };
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="surface rounded-3xl p-8 shadow-xl border-4 max-w-sm w-full text-center bob" style={{ borderColor: "#F1E2CE" }}>
-        <div className="text-5xl mb-3">🏡🔒</div>
+        <div className="text-5xl mb-3">{hostMode ? "🛠️🔒" : "🏡🔒"}</div>
         <h1 className="display font-bold text-2xl mb-1" style={{ color: "#C96F4A" }}>
-          {pub?.familyName ? `${pub.familyName} Housewarming` : "Housewarming Party"}
+          {hostMode ? "Host sign-in" : pub?.familyName ? `${pub.familyName} Housewarming` : "Housewarming Party"}
         </h1>
-        <p className="t-muted font-bold mb-5">Enter the passcode from your invite to come in.</p>
+        <p className="t-muted font-bold mb-5">{hostMode ? "Enter the host code to open the controls." : "Enter the passcode from your invite to come in."}</p>
         <input
           value={code} onChange={(e) => { setCode(e.target.value); setError(""); }}
-          onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="Housewarming passcode"
+          onKeyDown={(e) => e.key === "Enter" && submit()} placeholder={hostMode ? "Host / admin code" : "Housewarming passcode"}
           className="w-full mb-3 px-4 py-3 rounded-xl border-2 font-bold text-center focus:outline-none"
           style={{ background: "var(--input-bg)", borderColor: "var(--input-border)" }}
         />
@@ -655,6 +690,8 @@ function RSVP({ refreshKey, isAdmin, addressGated, onUnlockChange }: { refreshKe
   const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");
   const [list, setList] = useState<Rsvp[]>([]);
+  const [guestView, setGuestView] = useState<GuestListView | null>(null); // guests: names + headcount only
+  const [selfEntry, setSelfEntry] = useState<RsvpSelf | null>(null); // guests: own row via edit token
   const [loading, setLoading] = useState(true);
   // Cross-device recovery (name + PIN)
   const [recovering, setRecovering] = useState(false);
@@ -675,21 +712,48 @@ function RSVP({ refreshKey, isAdmin, addressGated, onUnlockChange }: { refreshKe
   const load = useCallback(async () => {
     try {
       const data = await rsvps.list();
-      setList(data);
-      // Reconcile our saved RSVP: forget it if the host has cleared/removed it.
-      try {
-        const raw = localStorage.getItem(MINE_KEY);
-        if (raw) {
-          const saved = JSON.parse(raw) as { id: string; editToken: string };
-          if (data.some((r) => r.id === saved.id)) setMine(saved);
-          else { localStorage.removeItem(MINE_KEY); setMine(null); }
-        }
-      } catch { /* ignore */ }
+      if (Array.isArray(data)) {
+        setList(data); setGuestView(null);
+        // Reconcile our saved RSVP: forget it if the host has cleared/removed it.
+        try {
+          const raw = localStorage.getItem(MINE_KEY);
+          if (raw) {
+            const saved = JSON.parse(raw) as { id: string; editToken: string };
+            if (data.some((r) => r.id === saved.id)) setMine(saved);
+            else { localStorage.removeItem(MINE_KEY); setMine(null); }
+          }
+        } catch { /* ignore */ }
+      } else {
+        // Guest view: names + headcount only. We can't check membership here —
+        // the self-fetch below validates the saved RSVP (and clears it on 404).
+        setGuestView(data); setList([]);
+        try {
+          const raw = localStorage.getItem(MINE_KEY);
+          if (raw) setMine(JSON.parse(raw) as { id: string; editToken: string });
+        } catch { /* ignore */ }
+      }
     } catch { /* ignore */ } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load, refreshKey]);
 
-  const myEntry = mine ? list.find((r) => r.id === mine.id) || null : null;
+  // Guests can't find themselves in the redacted list — fetch their own row
+  // with the edit token instead. Admin/family still derive it from the list.
+  useEffect(() => {
+    if (!guestView || !mine) { setSelfEntry(null); return; }
+    let alive = true;
+    rsvps.access(mine.id, mine.editToken)
+      .then((r) => { if (alive) setSelfEntry(r.self ?? null); })
+      .catch((e: any) => {
+        if (!alive) return;
+        setSelfEntry(null);
+        if (e?.status === 404) { try { localStorage.removeItem(MINE_KEY); } catch { /* ignore */ } setMine(null); }
+      });
+    return () => { alive = false; };
+  }, [guestView, mine, refreshKey]);
+
+  const myEntry: Rsvp | RsvpSelf | null = guestView
+    ? selfEntry
+    : mine ? list.find((r) => r.id === mine.id) || null : null;
 
   // Load my current values into the form to edit them.
   const beginEditMine = () => {
@@ -776,7 +840,7 @@ function RSVP({ refreshKey, isAdmin, addressGated, onUnlockChange }: { refreshKe
     } catch { setError("Couldn't save your RSVP — please try again."); } finally { setSubmitting(false); }
   };
 
-  const guestsComing = list.filter((r) => r.status === "yes").reduce((s, r) => s + (r.party_size || 0), 0);
+  const guestsComing = guestView ? guestView.totalGoing : list.filter((r) => r.status === "yes").reduce((s, r) => s + (r.party_size || 0), 0);
   const maybeCount = list.filter((r) => r.status === "maybe").length;
   const inputCls = "w-full mb-4 px-4 py-3 rounded-xl border-2 font-semibold focus:outline-none";
   const inputStyle = { background: "var(--input-bg)", borderColor: "var(--input-border)" } as const;
@@ -877,6 +941,20 @@ function RSVP({ refreshKey, isAdmin, addressGated, onUnlockChange }: { refreshKe
             <div className="font-bold opacity-90">friends coming so far!{maybeCount > 0 ? ` (+${maybeCount} maybe)` : ""}</div>
           </div>
           {loading ? <p className="t-muted font-bold text-center py-6">Loading replies…</p>
+            : guestView ? (
+              guestView.names.length === 0
+                ? <p className="t-muted font-bold text-center py-6">Be the first to RSVP! 🥳</p>
+                : (
+                  <>
+                    <p className="font-extrabold t-muted text-xs uppercase tracking-wide mb-2">Who's coming 🎉</p>
+                    <ul className="flex flex-wrap gap-2 max-h-72 overflow-auto pr-1">
+                      {guestView.names.map((n, i) => (
+                        <li key={i} className="px-3 py-1.5 rounded-full font-bold text-sm" style={{ background: "var(--input-bg)" }}>{n}</li>
+                      ))}
+                    </ul>
+                  </>
+                )
+            )
             : list.length === 0 ? <p className="t-muted font-bold text-center py-6">Be the first to RSVP! 🥳</p>
             : (
               <ul className="space-y-2 max-h-72 overflow-auto pr-1">
@@ -1718,8 +1796,8 @@ const SECTION_LABELS: [keyof SectionFlags, string][] = [
   ["food", "Bring a dish"], ["photos", "Photo gallery"], ["game", "House predictions"], ["gameCenter", "Game center"], ["gifts", "Registry"],
 ];
 
-function HostPanel({ sections, onSetSections, themeName, onSetTheme, requireApproval, onSetRequireApproval, familyName, onRefresh, onPreview, onEditDetails, onLock, onViewGuest }:
-  { sections: SectionFlags; onSetSections: (p: Partial<SectionFlags>) => void; themeName: ThemeName; onSetTheme: (t: ThemeName) => void; requireApproval: boolean; onSetRequireApproval: (b: boolean) => void; familyName: string; onRefresh: () => void; onPreview: () => void; onEditDetails: () => void; onLock: () => void; onViewGuest: () => void }) {
+function HostPanel({ sections, onSetSections, themeName, onSetTheme, requireApproval, onSetRequireApproval, guestEnabled, onSetGuestEnabled, familyName, onRefresh, onPreview, onEditDetails, onLock, onViewGuest }:
+  { sections: SectionFlags; onSetSections: (p: Partial<SectionFlags>) => void; themeName: ThemeName; onSetTheme: (t: ThemeName) => void; requireApproval: boolean; onSetRequireApproval: (b: boolean) => void; guestEnabled: boolean; onSetGuestEnabled: (b: boolean) => void; familyName: string; onRefresh: () => void; onPreview: () => void; onEditDetails: () => void; onLock: () => void; onViewGuest: () => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState("");
   const run = async (label: string, scope: "rsvps" | "potluck" | "gifts" | "wishlist" | "predictions" | "games" | "all") => {
@@ -1782,12 +1860,18 @@ function HostPanel({ sections, onSetSections, themeName, onSetTheme, requireAppr
             })}
           </div>
 
-          <p className="font-extrabold t-muted text-xs uppercase tracking-wide mb-2">Privacy</p>
+          <p className="font-extrabold t-muted text-xs uppercase tracking-wide mb-2">Privacy & access</p>
           <button onClick={() => onSetRequireApproval(!requireApproval)}
             className="btn-pop w-full flex items-center justify-between px-3 py-2 rounded-xl font-bold text-sm mb-4"
             style={{ background: "var(--input-bg)", color: "var(--text)" }}>
             <span className="text-left leading-tight">🔒 Address needs<br />RSVP approval</span>
             <span className="text-xs font-extrabold px-2 py-0.5 rounded-full text-white shrink-0" style={{ background: requireApproval ? "#7C9A6D" : "#cbd5e1" }}>{requireApproval ? "On" : "Off"}</span>
+          </button>
+          <button onClick={() => onSetGuestEnabled(!guestEnabled)}
+            className="btn-pop w-full flex items-center justify-between px-3 py-2 rounded-xl font-bold text-sm mb-4 -mt-2"
+            style={{ background: "var(--input-bg)", color: "var(--text)" }}>
+            <span className="text-left leading-tight">🎟️ Guest code<br />can unlock the site</span>
+            <span className="text-xs font-extrabold px-2 py-0.5 rounded-full text-white shrink-0" style={{ background: guestEnabled ? "#7C9A6D" : "#cbd5e1" }}>{guestEnabled ? "On" : "Off"}</span>
           </button>
 
           <p className="font-extrabold t-muted text-xs uppercase tracking-wide mb-2">Show sections to guests</p>
@@ -2137,6 +2221,7 @@ function EditDetailsModal({ event, onClose, onSaved }: { event: EventDetails; on
   const [form, setForm] = useState<EventContent>({
     themeName: event.themeName, // not edited here — the Host panel's theme picker owns this; it just rides along
     requireRsvpApproval: event.requireRsvpApproval, // same: owned by the Host panel privacy toggle
+    guestCodeEnabled: event.guestCodeEnabled, // same: owned by the Host panel access toggle
     familyName: event.familyName, tagline: event.tagline, partyDate: event.partyDate,
     timeLabel: event.timeLabel, venueName: event.venueName, address: event.address,
     hostNote: event.hostNote, rsvpDeadline: event.rsvpDeadline,
