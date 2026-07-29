@@ -6,11 +6,43 @@ import { pool, getContent } from "../db";
 import { requireAuth } from "../auth";
 
 export const rsvpRouter = Router();
+// Shared insert used by both the signed-in POST / and the public landing form.
+async function createRsvp(data: { name: string; status: string; partySize: number; message: string; email: string; phone: string; pin?: string }) {
+  const { name, status, partySize, message, email, phone, pin } = data;
+  const size = status === "no" ? 0 : Math.max(1, partySize);
+  const editToken = randomUUID(); // secret handed to this guest so they can edit their own entry
+  const pinHash = pin ? hashPin(name, pin) : null;
+  const { rows } = await pool.query(
+    `INSERT INTO rsvps (name, attending, status, party_size, message, email, phone, edit_token, pin_hash)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id, name, status, party_size, message, email, phone, approved, created_at`,
+    [name.trim(), status === "yes", status, size, message.trim(), email.trim(), phone.trim(), editToken, pinHash]
+  );
+  return { ...rows[0], editToken };
+}
+
+// PUBLIC: the landing-page RSVP (registered BEFORE requireAuth on purpose).
+// Anyone can RSVP from fontanezfamily.com without a passcode; submitting signs
+// them in as a guest so they land on the event page. The address remains
+// hidden until the host approves them — approval is the real gate now.
+// Respects the Host panel's guest-entry toggle and is rate-limited.
+const openLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
+rsvpRouter.post("/open", openLimiter, async (req, res) => {
+  const parsed = rsvpSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid RSVP" });
+  const content = await getContent();
+  if (!content.guestCodeEnabled) {
+    return res.status(403).json({ error: "Guest entry is currently closed", code: "guest_closed" });
+  }
+  const created = await createRsvp(parsed.data);
+  res.status(201).json({ ...created, role: "guest", token: signToken("guest") });
+});
+
 rsvpRouter.use(requireAuth()); // any signed-in guest or admin
 
 // PIN is bound to the (normalized) name so name+PIN identifies one RSVP.
 // Note: a short PIN is light security — the real protection is the rate limiter below.
-import { hashGuestPin as hashPin } from "../auth";
+import { hashGuestPin as hashPin, signToken } from "../auth";
 
 // Throttle PIN lookups so a 4-digit PIN can't be brute-forced over the API.
 const lookupLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 15, standardHeaders: true, legacyHeaders: false });
@@ -49,17 +81,7 @@ const rsvpSchema = z.object({
 rsvpRouter.post("/", async (req, res) => {
   const parsed = rsvpSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid RSVP" });
-  const { name, status, partySize, message, email, phone, pin } = parsed.data;
-  const size = status === "no" ? 0 : Math.max(1, partySize);
-  const editToken = randomUUID(); // secret handed to this guest so they can edit their own entry
-  const pinHash = pin ? hashPin(name, pin) : null;
-  const { rows } = await pool.query(
-    `INSERT INTO rsvps (name, attending, status, party_size, message, email, phone, edit_token, pin_hash)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     RETURNING id, name, status, party_size, message, email, phone, approved, created_at`,
-    [name.trim(), status === "yes", status, size, message.trim(), email.trim(), phone.trim(), editToken, pinHash]
-  );
-  res.status(201).json({ ...rows[0], editToken });
+  res.status(201).json(await createRsvp(parsed.data));
 });
 
 // Recover an RSVP from any device using name + PIN. Returns the edit token on a match.

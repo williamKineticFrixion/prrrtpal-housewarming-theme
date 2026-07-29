@@ -10,7 +10,13 @@ export const metaRouter = Router();
 // familyName comes from live host-edited content; defaultTheme stays env-set.
 metaRouter.get("/public", async (_req, res) => {
   const c = await getContent();
-  res.json({ familyName: c.familyName, defaultTheme: PUBLIC_EVENT.defaultTheme, themeName: c.themeName });
+  // Minimum public details for the landing page: enough to know WHAT and WHEN —
+  // never the address or venue (those stay behind sign-in + approval).
+  res.json({
+    familyName: c.familyName, defaultTheme: PUBLIC_EVENT.defaultTheme, themeName: c.themeName,
+    tagline: c.tagline, partyDate: c.partyDate, timeLabel: c.timeLabel,
+    rsvpDeadline: c.rsvpDeadline, guestCodeEnabled: c.guestCodeEnabled,
+  });
 });
 
 // Exchange a passcode for a 7-day token. Rate-limited in index.ts.

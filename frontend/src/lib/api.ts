@@ -54,7 +54,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 /* ---------- auth / event ---------- */
 
 // Public branding for the gate (no address). Safe to call before unlocking.
-export function getPublic(): Promise<{ familyName: string; defaultTheme: "day" | "night"; themeName: ThemeName }> {
+export interface PublicInfo {
+  familyName: string; defaultTheme: "day" | "night"; themeName: ThemeName;
+  tagline: string; partyDate: string; timeLabel: string; rsvpDeadline: string;
+  guestCodeEnabled: boolean;
+}
+export function getPublic(): Promise<PublicInfo> {
   return request("/api/public");
 }
 
@@ -73,6 +78,21 @@ export async function authenticate(passcode: string): Promise<Role> {
 
 // Returning-guest sign-in: name + PIN → guest token + their RSVP identity
 // (so the device can restore the banner and address unlock immediately).
+// Landing-page RSVP: no passcode needed. Creates the RSVP, signs this device in
+// as a guest (token stored), and returns the identity for MINE storage.
+export async function rsvpOpen(payload: { name: string; status: RsvpStatus; partySize: number; message: string; email: string; phone: string; pin?: string }):
+  Promise<{ id: string; editToken: string }> {
+  const data = await request<{ id: string; editToken: string; role: Role; token: string }>("/api/rsvps/open", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  try {
+    localStorage.setItem(TOKEN_KEY, data.token);
+    localStorage.setItem(ROLE_KEY, data.role);
+  } catch {}
+  return { id: data.id, editToken: data.editToken };
+}
+
 export async function authenticateGuestPin(name: string, pin: string): Promise<{ id: string; editToken: string }> {
   const data = await request<{ role: Role; token: string; rsvp: { id: string; editToken: string } }>("/api/auth/guest", {
     method: "POST",

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  getPublic, authenticate, authenticateGuestPin, getEvent, isUnlocked, getRole, logout,
+  getPublic, authenticate, authenticateGuestPin, rsvpOpen, getEvent, isUnlocked, getRole, logout, type PublicInfo,
   rsvps, potluck, gifts, wishlist, gallery, predictions, games as gamesApi, uploadImage, uploadAudio, uploadEcardImage, thumbUrl, cloudinaryConfigured, admin,
   type Role, type EventDetails, type EventContent, type Rsvp, type RsvpStatus, type Dish, type Claim, type WishlistItem, type GalleryPhoto, type SectionFlags, type Reveal, type Prediction, type ThemeName, type GameItem, type GuestListView, type RsvpSelf,
 } from "./lib/api";
@@ -78,7 +78,8 @@ const fmtDate = (iso: string) =>
 export default function App() {
   const [night, setNight] = useState(false);
   const [access, setAccess] = useState<"checking" | "locked" | Role>("checking");
-  const [pub, setPub] = useState<{ familyName: string; themeName?: ThemeName } | null>(null);
+  const [pub, setPub] = useState<PublicInfo | null>(null);
+  const [showCodeGate, setShowCodeGate] = useState(false); // landing → classic passcode gate
   const [event, setEvent] = useState<EventDetails | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [preview, setPreview] = useState(false); // host previewing the family keepsake view
@@ -209,7 +210,9 @@ export default function App() {
       {access === "checking" ? (
         <Splash text="🏡 Loading…" />
       ) : access === "locked" ? (
-        <Gate pub={pub} hostMode={IS_ADMIN_ROUTE} onUnlock={enter} />
+        IS_ADMIN_ROUTE ? <Gate pub={pub} hostMode onUnlock={enter} />
+        : showCodeGate ? <Gate pub={pub} onUnlock={enter} onBack={() => setShowCodeGate(false)} />
+        : <LandingGate pub={pub} onUnlock={enter} onUsePasscode={() => setShowCodeGate(true)} />
       ) : !event ? (
         <Splash text="🎉 Getting the house ready… 🎉" />
       ) : access === "family" ? (
@@ -489,7 +492,142 @@ function NightSky() {
 }
 
 /* ===================== GATE ===================== */
-function Gate({ pub, hostMode, onUnlock }: { pub: { familyName: string } | null; hostMode?: boolean; onUnlock: (role: Role) => void }) {
+/* ===================== PUBLIC LANDING (first visit) ===================== */
+// What anyone sees at fontanezfamily.com with no session: the minimum event
+// details (what + when — never the address) and the RSVP form. Submitting signs
+// them in as a guest and drops them on the event page; the address stays
+// hidden until the host approves their RSVP.
+function LandingGate({ pub, onUnlock, onUsePasscode }: { pub: PublicInfo | null; onUnlock: (role: Role) => void; onUsePasscode: () => void }) {
+  const [name, setName] = useState("");
+  const [status, setStatus] = useState<RsvpStatus>("yes");
+  const [count, setCount] = useState("1");
+  const [email, setEmail] = useState("");
+  const [pin, setPin] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  // Returning guests: name + PIN
+  const [pinMode, setPinMode] = useState(false);
+  const [gName, setGName] = useState("");
+  const [gPin, setGPin] = useState("");
+
+  const open = pub ? pub.guestCodeEnabled : true;
+  const dateLabel = pub?.partyDate
+    ? new Date(pub.partyDate).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })
+    : "";
+
+  const inputCls = "w-full mb-3 px-4 py-3 rounded-xl border-2 font-bold focus:outline-none";
+  const inputStyle = { background: "var(--input-bg)", borderColor: "var(--input-border)" } as const;
+
+  const submitRsvp = async () => {
+    if (!name.trim()) { setError("Please add your name 🙂"); return; }
+    if (email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) { setError("That email doesn't look right 📧"); return; }
+    setBusy(true); setError("");
+    try {
+      const partySize = status === "no" ? 0 : Math.max(1, parseInt(count, 10) || 1);
+      const mine = await rsvpOpen({ name: name.trim(), status, partySize, message: msg.trim(), email: email.trim(), phone: "", pin: pin.trim() || undefined });
+      try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); } catch { /* ignore */ }
+      onUnlock("guest");
+    } catch (e: any) {
+      setError(e?.body?.code === "guest_closed"
+        ? "RSVPs are currently closed — check back soon! 🔒"
+        : e?.status === 429 ? "Whoa, too many tries — give it a few minutes. 🐢"
+        : "Something went wrong sending your RSVP — please try again.");
+    } finally { setBusy(false); }
+  };
+
+  const submitPin = async () => {
+    if (!gName.trim() || !gPin.trim()) return;
+    setBusy(true); setError("");
+    try {
+      const mine = await authenticateGuestPin(gName.trim(), gPin.trim());
+      try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); } catch { /* ignore */ }
+      onUnlock("guest");
+    } catch (e: any) {
+      setError(e?.body?.code === "not_approved"
+        ? "Your RSVP hasn't been approved by the host yet — check back soon! ⏳"
+        : "We couldn't match that name and PIN. Try the exact name you RSVP'd with. 🔎");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 py-10">
+      <div className="max-w-md w-full">
+        <div className="text-center mb-6">
+          <div className="text-5xl mb-3 bob">🏡✨</div>
+          <h1 className="display font-bold leading-tight" style={{ fontSize: "clamp(1.9rem,7vw,2.6rem)", color: "#C96F4A" }}>
+            {pub?.familyName ? `${pub.familyName} Housewarming` : "Housewarming Party"}
+          </h1>
+          {pub?.tagline && <p className="font-bold t-muted mt-1">{pub.tagline}</p>}
+          <div className="flex flex-wrap gap-2 justify-center mt-3">
+            {dateLabel && <span className="px-3 py-1.5 rounded-full text-sm font-extrabold" style={{ background: "#D9A441", color: "#5a4310" }}>📅 {dateLabel}{pub?.timeLabel ? ` · ${pub.timeLabel}` : ""}</span>}
+            {pub?.rsvpDeadline && <span className="px-3 py-1.5 rounded-full text-sm font-extrabold" style={{ background: "var(--input-bg)", color: "var(--muted)" }}>💌 RSVP by {pub.rsvpDeadline}</span>}
+          </div>
+        </div>
+
+        <div className="surface rounded-3xl p-6 shadow-xl border-4" style={{ borderColor: "var(--input-border)" }}>
+          {pinMode ? (
+            <>
+              <p className="display font-bold text-xl mb-3 text-center" style={{ color: "#7C9A6D" }}>Welcome back! 👋</p>
+              <input value={gName} onChange={(e) => { setGName(e.target.value); setError(""); }} placeholder="Name on your RSVP" className={inputCls} style={inputStyle} />
+              <input value={gPin} onChange={(e) => { setGPin(e.target.value); setError(""); }} onKeyDown={(e) => e.key === "Enter" && submitPin()}
+                placeholder="Your PIN" type="password" inputMode="numeric" className={inputCls} style={inputStyle} />
+              {error && <p className="text-red-500 font-bold mb-3 text-sm text-center">{error}</p>}
+              <button onClick={submitPin} disabled={busy} className="btn-pop w-full py-3.5 rounded-xl font-extrabold text-white text-lg shadow-md disabled:opacity-60" style={{ background: "#7C9A6D" }}>
+                {busy ? "Checking…" : "Sign me in ✅"}
+              </button>
+              <button onClick={() => { setPinMode(false); setError(""); }} className="mt-3 block mx-auto text-sm font-bold t-muted underline">← Back to RSVP</button>
+            </>
+          ) : open ? (
+            <>
+              <p className="display font-bold text-xl mb-3 text-center" style={{ color: "#C96F4A" }}>Will you be there? 💌</p>
+              <input value={name} onChange={(e) => { setName(e.target.value); setError(""); }} placeholder="Your name (e.g. The Garcia Family)" className={inputCls} style={inputStyle} />
+              <div className="flex gap-2 mb-3">
+                {(["yes", "maybe", "no"] as RsvpStatus[]).map((val) => (
+                  <button key={val} onClick={() => setStatus(val)} className="btn-pop flex-1 py-2.5 rounded-xl font-extrabold border-2 text-sm"
+                    style={status === val
+                      ? { background: val === "yes" ? "#7C9A6D" : val === "maybe" ? "#D9A441" : "#C98A8A", borderColor: "transparent", color: val === "maybe" ? "#5a4310" : "#fff" }
+                      : { background: "var(--input-bg)", borderColor: "var(--input-border)", color: "var(--muted)" }}>
+                    {val === "yes" ? "Yes! 🎉" : val === "maybe" ? "Maybe 🤔" : "Can't 😢"}
+                  </button>
+                ))}
+              </div>
+              {status !== "no" && (
+                <div className="flex items-center gap-2 mb-3 pop">
+                  <label className="text-sm font-extrabold t-muted">How many of you?</label>
+                  <input type="number" min={1} max={20} value={count} onChange={(e) => setCount(e.target.value)}
+                    className="w-20 px-3 py-2 rounded-xl border-2 font-bold focus:outline-none" style={inputStyle} />
+                </div>
+              )}
+              <input value={email} onChange={(e) => { setEmail(e.target.value); setError(""); }} placeholder="Email (optional)" className={inputCls} style={inputStyle} />
+              <input value={pin} onChange={(e) => setPin(e.target.value)} placeholder="Set a PIN (recommended — signs you back in later)" type="password" inputMode="numeric" className={inputCls} style={inputStyle} />
+              <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={2} placeholder="Message for the hosts (optional)" className={inputCls} style={inputStyle} />
+              {error && <p className="text-red-500 font-bold mb-3 text-sm text-center">{error}</p>}
+              <button onClick={submitRsvp} disabled={busy} className="btn-pop w-full py-3.5 rounded-xl font-extrabold text-white text-lg shadow-md disabled:opacity-60" style={{ background: "#C96F4A" }}>
+                {busy ? "Sending…" : "Send RSVP & come on in 🎈"}
+              </button>
+              <button onClick={() => { setPinMode(true); setError(""); }} className="mt-3 block mx-auto text-sm font-bold t-muted underline">
+                Already RSVP'd? Sign in with your name + PIN
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="display font-bold text-xl mb-2 text-center" style={{ color: "#C96F4A" }}>RSVPs are closed 🔒</p>
+              <p className="t-muted font-bold text-center mb-4">Guest entry is currently closed — but if you've already RSVP'd and been approved, sign right in.</p>
+              {error && <p className="text-red-500 font-bold mb-3 text-sm text-center">{error}</p>}
+              <button onClick={() => { setPinMode(true); setError(""); }} className="btn-pop w-full py-3 rounded-xl font-extrabold text-white shadow-md" style={{ background: "#7C9A6D" }}>
+                Sign in with your name + PIN
+              </button>
+            </>
+          )}
+          <button onClick={onUsePasscode} className="mt-3 block mx-auto text-xs font-bold t-muted underline">Have an invite passcode or host code?</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Gate({ pub, hostMode, onBack, onUnlock }: { pub: { familyName: string } | null; hostMode?: boolean; onBack?: () => void; onUnlock: (role: Role) => void }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -571,6 +709,9 @@ function Gate({ pub, hostMode, onUnlock }: { pub: { familyName: string } | null;
           <button onClick={() => { setPinMode(true); setError(""); }} className="mt-3 text-sm font-bold t-muted underline">
             Already RSVP'd? Sign in with your name + PIN
           </button>
+        )}
+        {!hostMode && onBack && (
+          <button onClick={onBack} className="mt-2 block mx-auto text-sm font-bold t-muted underline">← Back to the RSVP page</button>
         )}
           </>
         )}
