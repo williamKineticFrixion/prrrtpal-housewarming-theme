@@ -16,6 +16,7 @@ metaRouter.get("/public", async (_req, res) => {
     familyName: c.familyName, defaultTheme: PUBLIC_EVENT.defaultTheme, themeName: c.themeName,
     tagline: c.tagline, partyDate: c.partyDate, timeLabel: c.timeLabel,
     rsvpDeadline: c.rsvpDeadline, guestCodeEnabled: c.guestCodeEnabled,
+    requireEmail: c.requireEmail, requirePhone: c.requirePhone,
   });
 });
 

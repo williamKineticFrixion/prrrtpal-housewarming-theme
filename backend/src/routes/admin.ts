@@ -55,6 +55,8 @@ const contentSchema = z
     themeName: z.enum(["warm", "pool"]),
     requireRsvpApproval: z.boolean(),
     guestCodeEnabled: z.boolean(),
+    requireEmail: z.boolean(),
+    requirePhone: z.boolean(),
     familyName: z.string().min(1).max(80),
     tagline: z.string().max(200),
     partyDate: z.string().min(1).max(40),

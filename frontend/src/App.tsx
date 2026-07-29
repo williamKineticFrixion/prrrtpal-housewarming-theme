@@ -177,6 +177,14 @@ export default function App() {
     } catch { /* ignore */ }
   };
 
+  // Admin: flip the RSVP contact requirements live (host panel toggles).
+  const setContactReq = async (patch: { requireEmail?: boolean; requirePhone?: boolean }) => {
+    try {
+      const next = await admin.setContent(patch);
+      setEvent((ev) => (ev ? { ...ev, ...next } : ev));
+    } catch { /* ignore */ }
+  };
+
   // Admin: open/close guest entry live (host panel toggle).
   const setGuestEnabled = async (guestCodeEnabled: boolean) => {
     try {
@@ -223,7 +231,7 @@ export default function App() {
           <Hero event={event} />
           <MaybeSection visible={event.sections.countdown} isAdmin={access === "admin"}><Countdown partyDate={event.partyDate} /></MaybeSection>
           <MaybeSection visible={event.sections.details} isAdmin={access === "admin"}><Details event={event} role={access} unlock={unlock} /></MaybeSection>
-          <MaybeSection visible={event.sections.rsvp} isAdmin={access === "admin"}><RSVP refreshKey={refreshKey} isAdmin={access === "admin"} addressGated={!!event.addressLocked || (access !== "guest" && event.requireRsvpApproval)} onUnlockChange={() => setRefreshKey((k) => k + 1)} /></MaybeSection>
+          <MaybeSection visible={event.sections.rsvp} isAdmin={access === "admin"}><RSVP refreshKey={refreshKey} isAdmin={access === "admin"} addressGated={!!event.addressLocked || (access !== "guest" && event.requireRsvpApproval)} requireEmail={event.requireEmail} requirePhone={event.requirePhone} onUnlockChange={() => setRefreshKey((k) => k + 1)} /></MaybeSection>
           <MaybeSection visible={event.sections.food} isAdmin={access === "admin"}><DishSignup categories={event.dishCategories} isAdmin={access === "admin"} refreshKey={refreshKey} /></MaybeSection>
           <MaybeSection visible={event.sections.photos} isAdmin={access === "admin"}><Gallery isAdmin={access === "admin"} partyDate={event.partyDate} refreshKey={refreshKey} /></MaybeSection>
           <MaybeSection visible={event.sections.game} isAdmin={access === "admin"}><Predictions role={access} refreshKey={refreshKey} /></MaybeSection>
@@ -240,6 +248,9 @@ export default function App() {
               onSetRequireApproval={setRequireApproval}
               guestEnabled={event.guestCodeEnabled}
               onSetGuestEnabled={setGuestEnabled}
+              requireEmail={event.requireEmail}
+              requirePhone={event.requirePhone}
+              onSetContactReq={setContactReq}
               familyName={event.familyName}
               onRefresh={() => setRefreshKey((k) => k + 1)}
               onPreview={() => setPreview(true)}
@@ -502,6 +513,7 @@ function LandingGate({ pub, onUnlock, onUsePasscode }: { pub: PublicInfo | null;
   const [status, setStatus] = useState<RsvpStatus>("yes");
   const [count, setCount] = useState("1");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -521,11 +533,13 @@ function LandingGate({ pub, onUnlock, onUsePasscode }: { pub: PublicInfo | null;
 
   const submitRsvp = async () => {
     if (!name.trim()) { setError("Please add your name 🙂"); return; }
+    if (pub?.requireEmail && !email.trim()) { setError("Please add your email — the hosts need it for this event. 📧"); return; }
+    if (pub?.requirePhone && !phone.trim()) { setError("Please add your phone number — the hosts need it for this event. 📱"); return; }
     if (email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) { setError("That email doesn't look right 📧"); return; }
     setBusy(true); setError("");
     try {
       const partySize = status === "no" ? 0 : Math.max(1, parseInt(count, 10) || 1);
-      const mine = await rsvpOpen({ name: name.trim(), status, partySize, message: msg.trim(), email: email.trim(), phone: "", pin: pin.trim() || undefined });
+      const mine = await rsvpOpen({ name: name.trim(), status, partySize, message: msg.trim(), email: email.trim(), phone: phone.trim(), pin: pin.trim() || undefined });
       try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); } catch { /* ignore */ }
       onUnlock("guest");
     } catch (e: any) {
@@ -599,7 +613,8 @@ function LandingGate({ pub, onUnlock, onUsePasscode }: { pub: PublicInfo | null;
                     className="w-20 px-3 py-2 rounded-xl border-2 font-bold focus:outline-none" style={inputStyle} />
                 </div>
               )}
-              <input value={email} onChange={(e) => { setEmail(e.target.value); setError(""); }} placeholder="Email (optional)" className={inputCls} style={inputStyle} />
+              <input value={email} onChange={(e) => { setEmail(e.target.value); setError(""); }} placeholder={pub?.requireEmail ? "Email (required)" : "Email (optional)"} className={inputCls} style={inputStyle} />
+              <input value={phone} onChange={(e) => { setPhone(e.target.value); setError(""); }} placeholder={pub?.requirePhone ? "Phone (required)" : "Phone (optional)"} inputMode="tel" className={inputCls} style={inputStyle} />
               <input value={pin} onChange={(e) => setPin(e.target.value)} placeholder="Set a PIN (recommended — signs you back in later)" type="password" inputMode="numeric" className={inputCls} style={inputStyle} />
               <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={2} placeholder="Message for the hosts (optional)" className={inputCls} style={inputStyle} />
               {error && <p className="text-red-500 font-bold mb-3 text-sm text-center">{error}</p>}
@@ -866,7 +881,7 @@ const STATUS_META: Record<RsvpStatus, { label: string; icon: string; bg: string 
   no: { label: "No 😢", icon: "🚫", bg: "#C98A8A" },
 };
 
-function RSVP({ refreshKey, isAdmin, addressGated, onUnlockChange }: { refreshKey: number; isAdmin: boolean; addressGated: boolean; onUnlockChange: () => void }) {
+function RSVP({ refreshKey, isAdmin, addressGated, requireEmail, requirePhone, onUnlockChange }: { refreshKey: number; isAdmin: boolean; addressGated: boolean; requireEmail: boolean; requirePhone: boolean; onUnlockChange: () => void }) {
   const [name, setName] = useState("");
   const [count, setCount] = useState("");
   const [status, setStatus] = useState<RsvpStatus>("yes");
@@ -1003,6 +1018,8 @@ function RSVP({ refreshKey, isAdmin, addressGated, onUnlockChange }: { refreshKe
   const submit = async () => {
     setError("");
     if (!name.trim()) { setError("Please add your name 🙂"); return; }
+    if (requireEmail && !email.trim()) { setError("Please add your email — the hosts need it for this event. 📧"); return; }
+    if (requirePhone && !phone.trim()) { setError("Please add your phone number — the hosts need it for this event. 📱"); return; }
     if (email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) { setError("That email doesn't look right 📧"); return; }
     setSubmitting(true);
     try {
@@ -1076,11 +1093,11 @@ function RSVP({ refreshKey, isAdmin, addressGated, onUnlockChange }: { refreshKe
           )}
           <div className="grid sm:grid-cols-2 gap-0 sm:gap-3">
             <div>
-              <label className="block font-extrabold t-muted mb-1">Email <span className="font-semibold opacity-70">(optional)</span></label>
+              <label className="block font-extrabold t-muted mb-1">Email <span className="font-semibold opacity-70">{requireEmail ? "(required)" : "(optional)"}</span></label>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={inputCls} style={inputStyle} />
             </div>
             <div>
-              <label className="block font-extrabold t-muted mb-1">Phone <span className="font-semibold opacity-70">(optional)</span></label>
+              <label className="block font-extrabold t-muted mb-1">Phone <span className="font-semibold opacity-70">{requirePhone ? "(required)" : "(optional)"}</span></label>
               <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(555) 123-4567" className={inputCls} style={inputStyle} />
             </div>
           </div>
@@ -1981,8 +1998,8 @@ const SECTION_LABELS: [keyof SectionFlags, string][] = [
   ["food", "Bring a dish"], ["photos", "Photo gallery"], ["game", "House predictions"], ["gameCenter", "Game center"], ["gifts", "Registry"],
 ];
 
-function HostPanel({ sections, onSetSections, themeName, onSetTheme, requireApproval, onSetRequireApproval, guestEnabled, onSetGuestEnabled, familyName, onRefresh, onPreview, onEditDetails, onLock, onViewGuest }:
-  { sections: SectionFlags; onSetSections: (p: Partial<SectionFlags>) => void; themeName: ThemeName; onSetTheme: (t: ThemeName) => void; requireApproval: boolean; onSetRequireApproval: (b: boolean) => void; guestEnabled: boolean; onSetGuestEnabled: (b: boolean) => void; familyName: string; onRefresh: () => void; onPreview: () => void; onEditDetails: () => void; onLock: () => void; onViewGuest: () => void }) {
+function HostPanel({ sections, onSetSections, themeName, onSetTheme, requireApproval, onSetRequireApproval, guestEnabled, onSetGuestEnabled, requireEmail, requirePhone, onSetContactReq, familyName, onRefresh, onPreview, onEditDetails, onLock, onViewGuest }:
+  { sections: SectionFlags; onSetSections: (p: Partial<SectionFlags>) => void; themeName: ThemeName; onSetTheme: (t: ThemeName) => void; requireApproval: boolean; onSetRequireApproval: (b: boolean) => void; guestEnabled: boolean; onSetGuestEnabled: (b: boolean) => void; requireEmail: boolean; requirePhone: boolean; onSetContactReq: (p: { requireEmail?: boolean; requirePhone?: boolean }) => void; familyName: string; onRefresh: () => void; onPreview: () => void; onEditDetails: () => void; onLock: () => void; onViewGuest: () => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState("");
   const run = async (label: string, scope: "rsvps" | "potluck" | "gifts" | "wishlist" | "predictions" | "games" | "all") => {
@@ -2057,6 +2074,20 @@ function HostPanel({ sections, onSetSections, themeName, onSetTheme, requireAppr
             style={{ background: "var(--input-bg)", color: "var(--text)" }}>
             <span className="text-left leading-tight">🎟️ Guest code<br />can unlock the site</span>
             <span className="text-xs font-extrabold px-2 py-0.5 rounded-full text-white shrink-0" style={{ background: guestEnabled ? "#7C9A6D" : "#cbd5e1" }}>{guestEnabled ? "On" : "Off"}</span>
+          </button>
+
+          <p className="font-extrabold t-muted text-xs uppercase tracking-wide mb-2">RSVP form</p>
+          <button onClick={() => onSetContactReq({ requireEmail: !requireEmail })}
+            className="btn-pop w-full flex items-center justify-between px-3 py-2 rounded-xl font-bold text-sm mb-1.5"
+            style={{ background: "var(--input-bg)", color: "var(--text)" }}>
+            <span>📧 Email</span>
+            <span className="text-xs font-extrabold px-2 py-0.5 rounded-full text-white shrink-0" style={{ background: requireEmail ? "#C96F4A" : "#cbd5e1" }}>{requireEmail ? "Required" : "Optional"}</span>
+          </button>
+          <button onClick={() => onSetContactReq({ requirePhone: !requirePhone })}
+            className="btn-pop w-full flex items-center justify-between px-3 py-2 rounded-xl font-bold text-sm mb-4"
+            style={{ background: "var(--input-bg)", color: "var(--text)" }}>
+            <span>📱 Phone</span>
+            <span className="text-xs font-extrabold px-2 py-0.5 rounded-full text-white shrink-0" style={{ background: requirePhone ? "#C96F4A" : "#cbd5e1" }}>{requirePhone ? "Required" : "Optional"}</span>
           </button>
 
           <p className="font-extrabold t-muted text-xs uppercase tracking-wide mb-2">Show sections to guests</p>
@@ -2407,6 +2438,7 @@ function EditDetailsModal({ event, onClose, onSaved }: { event: EventDetails; on
     themeName: event.themeName, // not edited here — the Host panel's theme picker owns this; it just rides along
     requireRsvpApproval: event.requireRsvpApproval, // same: owned by the Host panel privacy toggle
     guestCodeEnabled: event.guestCodeEnabled, // same: owned by the Host panel access toggle
+    requireEmail: event.requireEmail, requirePhone: event.requirePhone, // same: owned by the Host panel RSVP-form toggles
     familyName: event.familyName, tagline: event.tagline, partyDate: event.partyDate,
     timeLabel: event.timeLabel, venueName: event.venueName, address: event.address,
     hostNote: event.hostNote, rsvpDeadline: event.rsvpDeadline,

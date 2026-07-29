@@ -6,6 +6,15 @@ import { pool, getContent } from "../db";
 import { requireAuth } from "../auth";
 
 export const rsvpRouter = Router();
+// Host-configurable contact requirements, enforced server-side on every guest
+// write path (both RSVP doors and self-edits) — the UI labels merely mirror this.
+async function missingContact(email: string, phone: string): Promise<string | null> {
+  const c = await getContent();
+  if (c.requireEmail && !email.trim()) return "Please add your email — the hosts need it for this event. 📧";
+  if (c.requirePhone && !phone.trim()) return "Please add your phone number — the hosts need it for this event. 📱";
+  return null;
+}
+
 // Shared insert used by both the signed-in POST / and the public landing form.
 async function createRsvp(data: { name: string; status: string; partySize: number; message: string; email: string; phone: string; pin?: string }) {
   const { name, status, partySize, message, email, phone, pin } = data;
@@ -34,6 +43,8 @@ rsvpRouter.post("/open", openLimiter, async (req, res) => {
   if (!content.guestCodeEnabled) {
     return res.status(403).json({ error: "Guest entry is currently closed", code: "guest_closed" });
   }
+  const missing = await missingContact(parsed.data.email, parsed.data.phone);
+  if (missing) return res.status(400).json({ error: missing, code: "contact_required" });
   const created = await createRsvp(parsed.data);
   res.status(201).json({ ...created, role: "guest", token: signToken("guest") });
 });
@@ -81,6 +92,8 @@ const rsvpSchema = z.object({
 rsvpRouter.post("/", async (req, res) => {
   const parsed = rsvpSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid RSVP" });
+  const missing = await missingContact(parsed.data.email, parsed.data.phone);
+  if (missing) return res.status(400).json({ error: missing, code: "contact_required" });
   res.status(201).json(await createRsvp(parsed.data));
 });
 
@@ -131,6 +144,9 @@ rsvpRouter.patch("/:id/self", async (req, res) => {
   const status = p.status ?? cur[0].status;
   const rawSize = p.partySize ?? cur[0].party_size;
   const size = status === "no" ? 0 : Math.max(1, rawSize);
+  // A self-edit can't clear a required contact field either.
+  const missing = await missingContact((p.email ?? cur[0].email ?? ""), (p.phone ?? cur[0].phone ?? ""));
+  if (missing) return res.status(400).json({ error: missing, code: "contact_required" });
   const { rows } = await pool.query(
     `UPDATE rsvps SET name = $1, attending = $2, status = $3, party_size = $4, message = $5, email = $6, phone = $7
      WHERE id = $8
@@ -194,6 +210,9 @@ rsvpRouter.patch("/:id", requireAuth(["admin"]), async (req, res) => {
   const status = p.status ?? cur[0].status;
   const rawSize = p.partySize ?? cur[0].party_size;
   const size = status === "no" ? 0 : Math.max(1, rawSize);
+  // A self-edit can't clear a required contact field either.
+  const missing = await missingContact((p.email ?? cur[0].email ?? ""), (p.phone ?? cur[0].phone ?? ""));
+  if (missing) return res.status(400).json({ error: missing, code: "contact_required" });
 
   const { rows } = await pool.query(
     `UPDATE rsvps SET

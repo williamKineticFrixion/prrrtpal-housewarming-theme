@@ -58,6 +58,7 @@ export interface PublicInfo {
   familyName: string; defaultTheme: "day" | "night"; themeName: ThemeName;
   tagline: string; partyDate: string; timeLabel: string; rsvpDeadline: string;
   guestCodeEnabled: boolean;
+  requireEmail: boolean; requirePhone: boolean;
 }
 export function getPublic(): Promise<PublicInfo> {
   return request("/api/public");
@@ -110,6 +111,7 @@ export interface EventDetails {
   themeName: ThemeName;
   requireRsvpApproval: boolean; // host toggle: gate the address behind RSVP approval
   guestCodeEnabled: boolean; // host toggle: whether the guest passcode currently works
+  requireEmail: boolean; requirePhone: boolean; // host choice: RSVP contact fields optional or required
   addressLocked?: boolean; // true = guest must have an approved RSVP to get the address
   familyName: string; tagline: string; defaultTheme: "day" | "night";
   partyDate: string; timeLabel: string; venueName: string; address: string;
@@ -126,6 +128,8 @@ export interface EventContent {
   themeName: ThemeName;
   requireRsvpApproval: boolean;
   guestCodeEnabled: boolean;
+  requireEmail: boolean;
+  requirePhone: boolean;
   familyName: string; tagline: string; partyDate: string; timeLabel: string;
   venueName: string; address: string; hostNote: string; rsvpDeadline: string;
   dishCategories: string[]; registryUrl: string;
